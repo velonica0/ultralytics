@@ -130,6 +130,9 @@ class YOLOv8Seg:
         """
         x, protos = preds[0], preds[1]  # Two outputs: predictions and protos
 
+        x[:, [0, 2]] *= 640
+        x[:, [1, 3]] *= 640
+
         # Transpose the first output: (Batch_size, xywh_conf_cls_nm, Num_anchors) -> (Batch_size, Num_anchors, xywh_conf_cls_nm)
         x = np.einsum("bcn->bnc", x)
 
@@ -322,7 +325,7 @@ class YOLOv8Seg:
 if __name__ == "__main__":
     # Create an argument parser to handle command-line arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", type=str, required=True, help="Path to ONNX model")
+    parser.add_argument("--model", type=str, default="yolov8n-seg.onnx", help="Path to ONNX model")
     parser.add_argument("--source", type=str, default=str(ASSETS / "bus.jpg"), help="Path to input image")
     parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold")
     parser.add_argument("--iou", type=float, default=0.45, help="NMS IoU threshold")
