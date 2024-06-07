@@ -2,18 +2,131 @@
 
 import argparse
 
+import glob
+import os
+import time
+import yaml
 import cv2
+import shutil
+import pycocotools.mask as coco_mask
+import json
 import numpy as np
 from tflite_runtime import interpreter as tflite
-import yaml
 
-from ultralytics.utils import ASSETS, yaml_load
-from ultralytics.utils.checks import check_yaml
-from ultralytics.utils.plotting import Colors
+# from ultralytics.utils import ASSETS, yaml_load
+# from ultralytics.utils.checks import check_yaml
+# from ultralytics.utils.plotting import Colors
 
 # Declare as global variables, can be updated based trained model image size
 img_width = 640
 img_height = 640
+
+index_id_dict = {
+    0: 1,
+    1: 2,
+    2: 3,
+    3: 4,
+    4: 5,
+    5: 6,
+    6: 7,
+    7: 8,
+    8: 9,
+    9: 10,
+    10: 11,
+    11: 13,
+    12: 14,
+    13: 15,
+    14: 16,
+    15: 17,
+    16: 18,
+    17: 19,
+    18: 20,
+    19: 21,
+    20: 22,
+    21: 23,
+    22: 24,
+    23: 25,
+    24: 27,
+    25: 28,
+    26: 31,
+    27: 32,
+    28: 33,
+    29: 34,
+    30: 35,
+    31: 36,
+    32: 37,
+    33: 38,
+    34: 39,
+    35: 40,
+    36: 41,
+    37: 42,
+    38: 43,
+    39: 44,
+    40: 46,
+    41: 47,
+    42: 48,
+    43: 49,
+    44: 50,
+    45: 51,
+    46: 52,
+    47: 53,
+    48: 54,
+    49: 55,
+    50: 56,
+    51: 57,
+    52: 58,
+    53: 59,
+    54: 60,
+    55: 61,
+    56: 62,
+    57: 63,
+    58: 64,
+    59: 65,
+    60: 67,
+    61: 70,
+    62: 72,
+    63: 73,
+    64: 74,
+    65: 75,
+    66: 76,
+    67: 77,
+    68: 78,
+    69: 79,
+    70: 80,
+    71: 81,
+    72: 82,
+    73: 84,
+    74: 85,
+    75: 86,
+    76: 87,
+    77: 88,
+    78: 89,
+    79: 90
+}
+
+def binary_mask_to_rle(binary_mask):
+    """
+    将二值掩码转换为 RLE 格式
+    """
+    rle = coco_mask.encode(np.asfortranarray(binary_mask.astype(np.uint8)))
+    rle['counts'] = rle['counts'].decode('ascii')  # counts 是字节类型，需转换为字符串
+    return rle
+
+
+
+
+def merge_lists(list1, list2):
+    merged_list = []
+    len1, len2 = len(list1), len(list2)
+    max_len = max(len1, len2)
+
+    for i in range(max_len):
+        if i < len1:
+            merged_list.append(int(list1[i]))
+        if i < len2:
+            merged_list.append(int(list2[i]))
+
+    return merged_list
 
 
 class LetterBox:
@@ -88,7 +201,7 @@ class LetterBox:
 
 
 class Yolov8TFLite:
-    def __init__(self, tflite_model, input_image, confidence_thres, iou_thres):
+    def __init__(self, tflite_model, input_image_list,output_image_list, confidence_thres, iou_thres):
         """
         Initializes an instance of the Yolov8TFLite class.
 
@@ -100,7 +213,8 @@ class Yolov8TFLite:
         """
 
         self.tflite_model = tflite_model
-        self.input_image = input_image
+        self.input_image_list = input_image_list
+        self.output_image_list = output_image_list
         self.confidence_thres = confidence_thres
         self.iou_thres = iou_thres
 
@@ -113,10 +227,12 @@ class Yolov8TFLite:
         # # Generate a color palette for the classes
         # self.color_palette = np.random.uniform(0, 255, size=(len(self.classes), 3))
         # Create color palette
-        self.color_palette = Colors()
+        #self.color_palette = Colors()
 
         self.pad_h = None
         self.pad_w = None
+
+        self.coco_data = []
 
     def draw_detections(self, img, box, score, class_id):
         """
@@ -163,7 +279,7 @@ class Yolov8TFLite:
         # Draw the label text on the image
         cv2.putText(img, label, (int(label_x), int(label_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
 
-    def preprocess(self):
+    def preprocess(self,img_file):
         """
         Preprocesses the input image before performing inference.
 
@@ -172,7 +288,7 @@ class Yolov8TFLite:
         """
 
         # Read the input image using OpenCV
-        self.img = cv2.imread(self.input_image)
+        self.img = cv2.imread(img_file)
 
         #print("image before", self.img)
         # Get the height and width of the input image
@@ -232,7 +348,6 @@ class Yolov8TFLite:
             score = scores[i]
             class_id = class_ids[i]
             if score > 0.25:
-                print(box, score, class_id)
                 # Draw the detection on the input image
                 self.draw_detections(input_image, box, score, class_id)
 
@@ -340,7 +455,7 @@ class Yolov8TFLite:
             masks = masks[:, :, None]
         return masks
 
-    def draw_and_visualize(self, bboxes, segments, vis=False, save=True):
+    def draw_and_visualize(self, bboxes, masks, output_file,vis=False, save=True):
         """
         Draw and visualize results.
 
@@ -357,34 +472,12 @@ class Yolov8TFLite:
         im = self.img
         # Draw rectangles and polygons
         im_canvas = im.copy()
-        for (*box, conf, cls_), segment in zip(bboxes, segments):
-            print("cls_:", cls_)
-            # draw contour and fill mask
-            cv2.polylines(im, np.int32([segment]), True, (255, 255, 255), 2)  # white borderline
-            cv2.fillPoly(im_canvas, np.int32([segment]), self.color_palette(int(cls_), bgr=True))
-
-            # draw bbox rectangle
-            cv2.rectangle(
-                im,
-                (int(box[0]), int(box[1])),
-                (int(box[2]), int(box[3])),
-                self.color_palette(int(cls_), bgr=True),
-                1,
-                cv2.LINE_AA,
-            )
-            cv2.putText(
-                im,
-                f"{self.classes[cls_]}: {conf:.3f}",
-                (int(box[0]), int(box[1] - 9)),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.7,
-                self.color_palette(int(cls_), bgr=True),
-                2,
-                cv2.LINE_AA,
-            )
-
-        # Mix image
-        im = cv2.addWeighted(im_canvas, 0.3, im, 0.7, 0)
+        mask_canvas = np.zeros_like(im,dtype=np.uint8)
+        for (*box, conf, cls_), mask in zip(bboxes, masks):
+            #coco预测时的序号是从0开始，0代表person，所以应该+1使得背景为0
+            mask_canvas[mask] = int(cls_)+1
+            if(int(cls_)>77):
+                print("int(cls_)",int(cls_))
 
         # Show image
         if vis:
@@ -394,7 +487,7 @@ class Yolov8TFLite:
 
         # Save image
         if save:
-            cv2.imwrite("demo.jpg", im)
+            cv2.imwrite(output_file, mask_canvas)
 
     #根据onnx的代码改写的，适用于seg模型的两个输出头
     # 输入是模型推理的结果，即8400个预测框 1,8400,116 [cx,cy,w,h,class*80,32]
@@ -402,25 +495,25 @@ class Yolov8TFLite:
     def postprocess(self, output_detection, output_mask):
         output_detection[:, [0, 2]] *= img_width
         output_detection[:, [1, 3]] *= img_height
-        print(output_detection)
+        #print(output_detection)
         # Perform post-processing on the outputs to obtain output image.
         # img_output_detection = self.postprocess(self.img, output)
 
 
-        print("output", output_detection.shape)
+        #print("output", output_detection.shape)
         output_detection = output_detection.transpose(0, 2, 1)
         x = output_detection
-        print("x2", x.shape)    #(1, 8400, 116)
+        #print("x2", x.shape)    #(1, 8400, 116)
         # Predictions filtering by conf-threshold
         # 取class*80的列，计算了每个检测结果的置信度中的最大值，保留置信度高于阈值的检测结果。
         x = x[np.amax(x[..., 4:-32], axis=-1) > self.confidence_thres]
-        print("x3", x.shape)    #(, 116)
+        #print("x3", x.shape)    #(, 116)
         #重新拼接[位置信息4列][置信度最大值][置信度最大值索引][最后32列]
         x = np.c_[x[..., :4], np.amax(x[..., 4:-32], axis=-1), np.argmax(x[..., 4:-32], axis=-1), x[..., -32:]]
-        print("x4", x.shape)    #(, 38)
+        #print("x4", x.shape)    #(, 38)
         # NMS filtering
         x = x[cv2.dnn.NMSBoxes(x[:, :4], x[:, 4], self.confidence_thres, self.iou_thres)]
-        print("x5", x.shape)    #(, 38)
+        #print("x5", x.shape)    #(, 38)
 
         shape = self.img.shape[:2]  # original image shape
         new_shape = (640, 640)
@@ -446,9 +539,9 @@ class Yolov8TFLite:
             output_mask = np.squeeze(output_mask, axis=0)
             output_mask = output_mask.transpose(2, 0, 1)
 
-            print("output_mask", output_mask.shape)
-            print("x", x.shape)
-            print("self.img.shape", self.img.shape)
+            # print("output_mask", output_mask.shape)
+            # print("x", x.shape)
+            # print("self.img.shape", self.img.shape)
 
             # Process masks
             # x[:, 6:]与mask相关 x[:, :4]与bbox相关
@@ -458,7 +551,7 @@ class Yolov8TFLite:
             segments = self.masks2segments(masks)
             return x[..., :6], segments, masks  # boxes, segments, masks
 
-            print("x[..., :6]", x.shape)
+            # print("x[..., :6]", x.shape)
 
         else:
             return [], [], []
@@ -472,55 +565,101 @@ class Yolov8TFLite:
         Returns:
             output_img: The output image with drawn detections.
         """
+        sum_time=0
+        idx=0
+        image_files = glob.glob(os.path.join(self.input_image_list, '*'))
+        for image_file in image_files:
+            # Create an interpreter for the TFLite model
+            interpreter = tflite.Interpreter(model_path=self.tflite_model)
+            self.model = interpreter
+            interpreter.allocate_tensors()
 
-        # Create an interpreter for the TFLite model
-        interpreter = tflite.Interpreter(model_path=self.tflite_model)
-        self.model = interpreter
-        interpreter.allocate_tensors()
+            # Get the model inputs
+            input_details = interpreter.get_input_details()
+            output_details = interpreter.get_output_details()
 
-        # Get the model inputs
-        input_details = interpreter.get_input_details()
-        output_details = interpreter.get_output_details()
+            # Store the shape of the input for later use
+            input_shape = input_details[0]["shape"]
+            self.input_width = input_shape[1]
+            self.input_height = input_shape[2]
 
-        print("output_details",output_details)
+            # Preprocess the image data
+            img_data = self.preprocess(image_file)
+            img_data = img_data
+            # img_data = img_data.cpu().numpy()
+            # Set the input tensor to the interpreter
+            img_data = img_data.transpose((0, 2, 3, 1))
 
-        # Store the shape of the input for later use
-        input_shape = input_details[0]["shape"]
-        self.input_width = input_shape[1]
-        self.input_height = input_shape[2]
+            scale, zero_point = input_details[0]["quantization"]
+            start = time.perf_counter()
+            interpreter.set_tensor(input_details[0]["index"], img_data)
 
-        # Preprocess the image data
-        img_data = self.preprocess()
-        img_data = img_data
-        # img_data = img_data.cpu().numpy()
-        # Set the input tensor to the interpreter
-        # print(input_details[0]["index"])
-        print("img_data",img_data.shape)
-        img_data = img_data.transpose((0, 2, 3, 1))
+            # Run inference
+            interpreter.invoke()
 
-        scale, zero_point = input_details[0]["quantization"]
-        interpreter.set_tensor(input_details[0]["index"], img_data)
+            # Get the output tensor from the interpreter
+            output_detection = interpreter.get_tensor(output_details[0]["index"])
+            output_mask = interpreter.get_tensor(output_details[1]["index"])
+            inference_time = (time.perf_counter() - start) * 1000
+            sum_time += inference_time
+            #output = (output.astype(np.float32) - zero_point) * scale
 
-        # Run inference
-        interpreter.invoke()
 
-        # Get the output tensor from the interpreter
-        output_detection = interpreter.get_tensor(output_details[0]["index"])
-        scale, zero_point = output_details[0]["quantization"]
-        #output = (output.astype(np.float32) - zero_point) * scale
+            # Perform post-processing on the outputs to obtain output image.
+            boxes, segments, masks = self.postprocess(output_detection, output_mask)
 
-        print("output_detection",output_detection.shape)
+            output_file = image_file.replace(self.input_image_list, self.output_image_list).replace(".jpg", ".png")
+            #self.draw_and_visualize(boxes, masks, output_file, vis=False, save=True)
 
-        output_mask = interpreter.get_tensor(output_details[1]["index"])
+            # 获取文件名（包括扩展名）
+            file_name_with_extension = os.path.basename(image_file)
+            # 去除前置0并获取文件名（不包括扩展名）
+            file_name_without_extension = int(file_name_with_extension.split('.')[0])
 
-        return self.postprocess(output_detection,output_mask)
+            for (box,segment,mask) in zip(boxes,segments,masks):
+                box[2]-=box[0]
+                box[3]-=box[1]
+                seg = merge_lists(segment[:,0],segment[:,1])
+                #box = [int(x) for x in box]
+                b=box[:4]
+                b = [int(x) for x in b]
+                annotation = {
+                    "image_id": file_name_without_extension,
+                    "category_id": index_id_dict[int(box[5])],
+                    "bbox": box[:4].tolist(),  # YOLO格式的边界框坐标
+                    "segmentation": binary_mask_to_rle(mask),  # 分割信息
+                    "score": box[4]  # 置信度
+                }
+                self.coco_data.append(annotation)
 
+        with open("seg.json", "w") as f:
+            json.dump(self.coco_data, f)
+
+        return sum_time
 
 
 
 
         #return segments, masks
 
+def recreate_empty_folder(folder_path):
+    # 检查文件夹是否存在
+    if os.path.exists(folder_path):
+        # 如果存在，删除文件夹及其内容
+        try:
+            shutil.rmtree(folder_path)
+            time.sleep(1)
+        except OSError as e:
+            print(f"Error: {folder_path} - {e.strerror}")
+            return False
+    # 创建新的空文件夹
+    try:
+        os.makedirs(folder_path)
+        print(f"Folder '{folder_path}' recreated successfully.")
+        return True
+    except OSError as e:
+        print(f"Error: {folder_path} - {e.strerror}")
+        return False
 
 if __name__ == "__main__":
     # Create an argument parser to handle command-line arguments
@@ -529,19 +668,25 @@ if __name__ == "__main__":
         #"--model", type=str, default="/home/velonica/code/yolov8/yolov8s_saved_model/yolov8s_float32.tflite", help="Input your TFLite model."
         "--model", type=str, default="C:\\GitHub\\ultralytics\\examples\\YOLOv8-OpenCV-int8-tflite-Python/yolov8n-seg_float32.tflite", help="Input your TFLite model."
     )
-    parser.add_argument("--img", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_jpg_seg\\000000000139.jpg", help="Path to input image.")
+    parser.add_argument("--img_input_list", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_jpg_seg",
+                        help="Path to input image.")
+    parser.add_argument("--img_output_list", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_seg_seg_300",
+                        help="Path to output img")
     parser.add_argument("--conf-thres", type=float, default=0.5, help="Confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.5, help="NMS IoU threshold")
     args = parser.parse_args()
 
+    recreate_empty_folder(args.img_output_list)
+
     # Create an instance of the Yolov8TFLite class with the specified arguments
-    detection = Yolov8TFLite(args.model, args.img, args.conf_thres, args.iou_thres)
+    detection = Yolov8TFLite(args.model, args.img_input_list, args.img_output_list, args.conf_thres, args.iou_thres)
 
     # Perform object detection and obtain the output image
-    boxes, segments, _ = detection.main()
+    sum_time = detection.main()
+    print(sum_time)
 
     # Draw bboxes and polygons
-    detection.draw_and_visualize(boxes, segments, vis=False, save=True)
+    #detection.draw_and_visualize(boxes, masks, vis=False, save=True)
 
     # # Display the output image in a window
     # cv2.imshow("Output", output_image)
