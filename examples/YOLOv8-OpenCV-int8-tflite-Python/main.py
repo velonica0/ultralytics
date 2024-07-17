@@ -5,9 +5,12 @@ import argparse
 import cv2
 import numpy as np
 from tflite_runtime import interpreter as tflite
+import yaml
+from utils import Colors
 
-from ultralytics.utils import ASSETS, yaml_load
-from ultralytics.utils.checks import check_yaml
+
+# from ultralytics.utils import ASSETS, yaml_load
+# from ultralytics.utils.checks import check_yaml
 
 # Declare as global variables, can be updated based trained model image size
 img_width = 640
@@ -102,7 +105,10 @@ class Yolov8TFLite:
         self.iou_thres = iou_thres
 
         # Load the class names from the COCO dataset
-        self.classes = yaml_load(check_yaml("coco8.yaml"))["names"]
+        # Load the class names from the COCO dataset
+        yamlPath = "/home/openkylin/workspace/ultralytics/ultralytics/cfg/datasets/coco8.yaml"
+        with open(yamlPath, 'r', encoding='utf-8') as f:
+            self.classes = yaml.load(f, Loader=yaml.SafeLoader)["names"]
 
         # Generate a color palette for the classes
         self.color_palette = np.random.uniform(0, 255, size=(len(self.classes), 3))
@@ -266,7 +272,7 @@ class Yolov8TFLite:
         # Get the output tensor from the interpreter
         output = interpreter.get_tensor(output_details[0]["index"])
         scale, zero_point = output_details[0]["quantization"]
-        output = (output.astype(np.float32) - zero_point) * scale
+        #output = (output.astype(np.float32) - zero_point) * scale
 
         output[:, [0, 2]] *= img_width
         output[:, [1, 3]] *= img_height
@@ -279,9 +285,9 @@ if __name__ == "__main__":
     # Create an argument parser to handle command-line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model", type=str, default="yolov8n_full_integer_quant.tflite", help="Input your TFLite model."
+        "--model", type=str, default="yolov8n_float32.tflite", help="Input your TFLite model."
     )
-    parser.add_argument("--img", type=str, default=str(ASSETS / "bus.jpg"), help="Path to input image.")
+    parser.add_argument("--img", type=str, default="C:\\work\\datasets\coco\\test-dev\\voc_jpg\\000000002923.jpg", help="Path to input image.")
     parser.add_argument("--conf-thres", type=float, default=0.5, help="Confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.5, help="NMS IoU threshold")
     args = parser.parse_args()

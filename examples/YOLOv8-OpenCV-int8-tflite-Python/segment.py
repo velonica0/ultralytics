@@ -6,10 +6,11 @@ import cv2
 import numpy as np
 from tflite_runtime import interpreter as tflite
 import yaml
+from utils import Colors
 
 from ultralytics.utils import ASSETS, yaml_load
 from ultralytics.utils.checks import check_yaml
-from ultralytics.utils.plotting import Colors
+# from ultralytics.utils.plotting import Colors
 
 # Declare as global variables, can be updated based trained model image size
 img_width = 640
