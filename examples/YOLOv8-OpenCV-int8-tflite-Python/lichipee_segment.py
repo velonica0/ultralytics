@@ -15,7 +15,7 @@ from tflite_runtime import interpreter as tflite
 
 # from ultralytics.utils import ASSETS, yaml_load
 # from ultralytics.utils.checks import check_yaml
-from ultralytics.utils.plotting import Colors
+# from ultralytics.utils.plotting import Colors
 
 # Declare as global variables, can be updated based trained model image size
 img_width = 640
@@ -201,7 +201,7 @@ class LetterBox:
 
 
 class Yolov8TFLite:
-    def __init__(self, tflite_model, input_image_list,output_image_list, confidence_thres, iou_thres):
+    def __init__(self, tflite_model, input_image_list, confidence_thres, iou_thres):
         """
         Initializes an instance of the Yolov8TFLite class.
 
@@ -214,13 +214,13 @@ class Yolov8TFLite:
 
         self.tflite_model = tflite_model
         self.input_image_list = input_image_list
-        self.output_image_list = output_image_list
+        # self.output_image_list = output_image_list
         self.confidence_thres = confidence_thres
         self.iou_thres = iou_thres
 
         # Load the class names from the COCO dataset
         #self.classes = yaml_load(check_yaml("coco8.yaml"))["names"]
-        yamlPath = "coco8.yaml"
+        yamlPath = "/home/openkylin/workspace/YOLOv8-OpenCV-int8-tflite-Python/coco8.yaml"
         with open(yamlPath, 'r', encoding='utf-8') as f:
             self.classes = yaml.load(f,Loader=yaml.SafeLoader)["names"]
 
@@ -569,6 +569,16 @@ class Yolov8TFLite:
         idx=0
         image_files = glob.glob(os.path.join(self.input_image_list, '*'))
         for image_file in image_files:
+
+            # Preprocess the image data
+            img_data = self.preprocess(image_file)
+            img_data = img_data
+            # img_data = img_data.cpu().numpy()
+            # Set the input tensor to the interpreter
+            img_data = img_data.transpose((0, 2, 3, 1))
+
+            start = time.perf_counter()
+
             # Create an interpreter for the TFLite model
             interpreter = tflite.Interpreter(model_path=self.tflite_model)
             self.model = interpreter
@@ -583,15 +593,8 @@ class Yolov8TFLite:
             self.input_width = input_shape[1]
             self.input_height = input_shape[2]
 
-            # Preprocess the image data
-            img_data = self.preprocess(image_file)
-            img_data = img_data
-            # img_data = img_data.cpu().numpy()
-            # Set the input tensor to the interpreter
-            img_data = img_data.transpose((0, 2, 3, 1))
+            #scale, zero_point = input_details[0]["quantization"]
 
-            scale, zero_point = input_details[0]["quantization"]
-            start = time.perf_counter()
             interpreter.set_tensor(input_details[0]["index"], img_data)
 
             # Run inference
@@ -608,7 +611,7 @@ class Yolov8TFLite:
             # Perform post-processing on the outputs to obtain output image.
             boxes, segments, masks = self.postprocess(output_detection, output_mask)
 
-            output_file = image_file.replace(self.input_image_list, self.output_image_list).replace(".jpg", ".png")
+            #output_file = image_file.replace(self.input_image_list, self.output_image_list).replace(".jpg", ".png")
             #self.draw_and_visualize(boxes, masks, output_file, vis=False, save=True)
 
             # 获取文件名（包括扩展名）
@@ -666,20 +669,20 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         #"--model", type=str, default="/home/velonica/code/yolov8/yolov8s_saved_model/yolov8s_float32.tflite", help="Input your TFLite model."
-        "--model", type=str, default="C:\\GitHub\\ultralytics\\examples\\YOLOv8-OpenCV-int8-tflite-Python/yolov8n-seg_float32.tflite", help="Input your TFLite model."
+        "--model", type=str, default="", help="Input your TFLite model."
     )
-    parser.add_argument("--img_input_list", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_jpg_seg",
+    parser.add_argument("--img_input_list", type=str, default="",
                         help="Path to input image.")
-    parser.add_argument("--img_output_list", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_seg_seg_300",
-                        help="Path to output img")
+    # parser.add_argument("--img_output_list", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_seg_seg_300",
+    #                     help="Path to output img")
     parser.add_argument("--conf-thres", type=float, default=0.5, help="Confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.5, help="NMS IoU threshold")
     args = parser.parse_args()
 
-    recreate_empty_folder(args.img_output_list)
+    #recreate_empty_folder(args.img_output_list)
 
     # Create an instance of the Yolov8TFLite class with the specified arguments
-    detection = Yolov8TFLite(args.model, args.img_input_list, args.img_output_list, args.conf_thres, args.iou_thres)
+    detection = Yolov8TFLite(args.model, args.img_input_list, args.conf_thres, args.iou_thres)
 
     # Perform object detection and obtain the output image
     sum_time = detection.main()

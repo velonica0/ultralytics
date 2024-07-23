@@ -6,15 +6,18 @@ import cv2
 import numpy as np
 from tflite_runtime import interpreter as tflite
 import yaml
-from utils import Colors
 
-from ultralytics.utils import ASSETS, yaml_load
-from ultralytics.utils.checks import check_yaml
+from utils import Colors
+import time
+
+# from ultralytics.utils import ASSETS, yaml_load
+# from ultralytics.utils.checks import check_yaml
 # from ultralytics.utils.plotting import Colors
 
 # Declare as global variables, can be updated based trained model image size
 img_width = 640
 img_height = 640
+
 
 
 class LetterBox:
@@ -107,12 +110,12 @@ class Yolov8TFLite:
 
         # Load the class names from the COCO dataset
         #self.classes = yaml_load(check_yaml("coco8.yaml"))["names"]
-        yamlPath = "coco8.yaml"
+        yamlPath = "/home/openkylin/workspace/ultralytics/ultralytics/cfg/datasets/coco8.yaml"
         with open(yamlPath, 'r', encoding='utf-8') as f:
             self.classes = yaml.load(f,Loader=yaml.SafeLoader)["names"]
 
         # # Generate a color palette for the classes
-        # self.color_palette = np.random.uniform(0, 255, size=(len(self.classes), 3))
+        #self.color_palette = np.random.uniform(0, 255, size=(len(self.classes), 3))
         # Create color palette
         self.color_palette = Colors()
 
@@ -395,7 +398,7 @@ class Yolov8TFLite:
 
         # Save image
         if save:
-            cv2.imwrite("demo.jpg", im)
+            cv2.imwrite("/home/openkylin/workspace/yolov8_model/segment_scalar/000000010092_n.jpg", im)
 
     #根据onnx的代码改写的，适用于seg模型的两个输出头
     # 输入是模型推理的结果，即8400个预测框 1,8400,116 [cx,cy,w,h,class*80,32]
@@ -474,6 +477,17 @@ class Yolov8TFLite:
             output_img: The output image with drawn detections.
         """
 
+        # Preprocess the image data
+        img_data = self.preprocess()
+        img_data = img_data
+        # img_data = img_data.cpu().numpy()
+        # Set the input tensor to the interpreter
+        # print(input_details[0]["index"])
+        print("img_data",img_data.shape)
+        img_data = img_data.transpose((0, 2, 3, 1))
+
+        start = time.perf_counter()
+
         # Create an interpreter for the TFLite model
         interpreter = tflite.Interpreter(model_path=self.tflite_model)
         self.model = interpreter
@@ -490,14 +504,7 @@ class Yolov8TFLite:
         self.input_width = input_shape[1]
         self.input_height = input_shape[2]
 
-        # Preprocess the image data
-        img_data = self.preprocess()
-        img_data = img_data
-        # img_data = img_data.cpu().numpy()
-        # Set the input tensor to the interpreter
-        # print(input_details[0]["index"])
-        print("img_data",img_data.shape)
-        img_data = img_data.transpose((0, 2, 3, 1))
+
 
         scale, zero_point = input_details[0]["quantization"]
         interpreter.set_tensor(input_details[0]["index"], img_data)
@@ -507,6 +514,8 @@ class Yolov8TFLite:
 
         # Get the output tensor from the interpreter
         output_detection = interpreter.get_tensor(output_details[0]["index"])
+        inference_time = (time.perf_counter() - start) * 1000
+        print("Inference time: {:.2f} ms".format(inference_time))
         scale, zero_point = output_details[0]["quantization"]
         #output = (output.astype(np.float32) - zero_point) * scale
 
@@ -528,9 +537,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         #"--model", type=str, default="/home/velonica/code/yolov8/yolov8s_saved_model/yolov8s_float32.tflite", help="Input your TFLite model."
-        "--model", type=str, default="C:\\GitHub\\ultralytics\\examples\\YOLOv8-OpenCV-int8-tflite-Python/yolov8n-seg_float32.tflite", help="Input your TFLite model."
+        "--model", type=str, default="", help="Input your TFLite model."
     )
-    parser.add_argument("--img", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_jpg_seg\\000000000139.jpg", help="Path to input image.")
+    parser.add_argument("--img", type=str, default="", help="Path to input image.")
     parser.add_argument("--conf-thres", type=float, default=0.5, help="Confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.5, help="NMS IoU threshold")
     args = parser.parse_args()
@@ -549,4 +558,4 @@ if __name__ == "__main__":
 
     # # Wait for a key press to exit
     # cv2.waitKey(0)
-    #cv2.imwrite("output_image.png",output_image)
+    # cv2.imwrite("/home/openkylin/workspace/000000010092_.jpg",output_image)

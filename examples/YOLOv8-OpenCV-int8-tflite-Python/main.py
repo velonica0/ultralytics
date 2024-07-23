@@ -7,7 +7,7 @@ import numpy as np
 from tflite_runtime import interpreter as tflite
 import yaml
 from utils import Colors
-
+import time
 
 # from ultralytics.utils import ASSETS, yaml_load
 # from ultralytics.utils.checks import check_yaml
@@ -19,7 +19,7 @@ img_height = 640
 
 class LetterBox:
     def __init__(
-        self, new_shape=(img_width, img_height), auto=False, scaleFill=False, scaleup=True, center=True, stride=32
+            self, new_shape=(img_width, img_height), auto=False, scaleFill=False, scaleup=True, center=True, stride=32
     ):
         self.new_shape = new_shape
         self.auto = auto
@@ -104,7 +104,6 @@ class Yolov8TFLite:
         self.confidence_thres = confidence_thres
         self.iou_thres = iou_thres
 
-        # Load the class names from the COCO dataset
         # Load the class names from the COCO dataset
         yamlPath = "/home/openkylin/workspace/ultralytics/ultralytics/cfg/datasets/coco8.yaml"
         with open(yamlPath, 'r', encoding='utf-8') as f:
@@ -240,6 +239,15 @@ class Yolov8TFLite:
             output_img: The output image with drawn detections.
         """
 
+        # Preprocess the image data
+        img_data = self.preprocess()
+        img_data = img_data
+        # img_data = img_data.cpu().numpy()
+        # Set the input tensor to the interpreter
+        img_data = img_data.transpose((0, 2, 3, 1))
+
+        start = time.perf_counter()
+
         # Create an interpreter for the TFLite model
         interpreter = tflite.Interpreter(model_path=self.tflite_model)
         self.model = interpreter
@@ -248,22 +256,13 @@ class Yolov8TFLite:
         # Get the model inputs
         input_details = interpreter.get_input_details()
         output_details = interpreter.get_output_details()
+        scale, zero_point = input_details[0]["quantization"]
 
         # Store the shape of the input for later use
         input_shape = input_details[0]["shape"]
         self.input_width = input_shape[1]
         self.input_height = input_shape[2]
 
-        # Preprocess the image data
-        img_data = self.preprocess()
-        img_data = img_data
-        # img_data = img_data.cpu().numpy()
-        # Set the input tensor to the interpreter
-        print(input_details[0]["index"])
-        print(img_data.shape)
-        img_data = img_data.transpose((0, 2, 3, 1))
-
-        scale, zero_point = input_details[0]["quantization"]
         interpreter.set_tensor(input_details[0]["index"], img_data)
 
         # Run inference
@@ -271,8 +270,10 @@ class Yolov8TFLite:
 
         # Get the output tensor from the interpreter
         output = interpreter.get_tensor(output_details[0]["index"])
+        inference_time = (time.perf_counter() - start) * 1000
+        print("Inference time: {:.2f} ms".format(inference_time))
         scale, zero_point = output_details[0]["quantization"]
-        #output = (output.astype(np.float32) - zero_point) * scale
+        # output = (output.astype(np.float32) - zero_point) * scale
 
         output[:, [0, 2]] *= img_width
         output[:, [1, 3]] *= img_height
@@ -285,9 +286,12 @@ if __name__ == "__main__":
     # Create an argument parser to handle command-line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model", type=str, default="yolov8n_float32.tflite", help="Input your TFLite model."
+        "--model", type=str,
+        default="",
+        help="Input your TFLite model."
     )
-    parser.add_argument("--img", type=str, default="C:\\work\\datasets\coco\\test-dev\\voc_jpg\\000000002923.jpg", help="Path to input image.")
+    parser.add_argument("--img", type=str, default="",
+                        help="Path to input image.")
     parser.add_argument("--conf-thres", type=float, default=0.5, help="Confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.5, help="NMS IoU threshold")
     args = parser.parse_args()
@@ -299,7 +303,8 @@ if __name__ == "__main__":
     output_image = detection.main()
 
     # Display the output image in a window
-    cv2.imshow("Output", output_image)
+    # cv2.imshow("Output", output_image)
+    cv2.imwrite("/home/openkylin/workspace/yolov8_model/detection_scalar/000000010092_s.jpg", output_image)
 
     # Wait for a key press to exit
-    cv2.waitKey(0)
+    # cv2.waitKey(0)

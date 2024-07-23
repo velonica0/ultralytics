@@ -1,7 +1,7 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 
 import argparse
-
+import json
 import glob
 import os
 import time
@@ -9,6 +9,8 @@ import yaml
 import cv2
 import numpy as np
 from tflite_runtime import interpreter as tflite
+
+from utils import index_id_dict
 
 # from ultralytics.utils import ASSETS, yaml_load
 # from ultralytics.utils.checks import check_yaml
@@ -89,7 +91,7 @@ class LetterBox:
 
 
 class Yolov8TFLite:
-    def __init__(self, tflite_model, input_image_list, output_txt_list,confidence_thres, iou_thres):
+    def __init__(self, tflite_model, input_image_list,confidence_thres, iou_thres):
         """
         Initializes an instance of the Yolov8TFLite class.
 
@@ -103,9 +105,11 @@ class Yolov8TFLite:
         self.tflite_model = tflite_model
         self.input_image_list = input_image_list
         self.input_image_folder = os.path.basename(os.path.normpath(input_image_list))
-        self.output_txt_folder = os.path.basename(os.path.normpath(output_txt_list))
+        # self.output_txt_folder = os.path.basename(os.path.normpath(output_txt_list))
         self.confidence_thres = confidence_thres
         self.iou_thres = iou_thres
+
+        self.coco_data = []
 
         # Load the class names from the COCO dataset
         yamlPath = "coco8.yaml"
@@ -161,9 +165,6 @@ class Yolov8TFLite:
         cv2.putText(img, label, (int(label_x), int(label_y)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1, cv2.LINE_AA)
 
     def write2txt(self,box,score,class_id,image_file,txt_name):
-
-
-
         # Extract the coordinates of the bounding box
         x1, y1, w, h = box
         left=x1
@@ -174,6 +175,15 @@ class Yolov8TFLite:
         content_to_append = f"{self.classes[class_id]} {score} {left} {top} {right} {bottom}\n"
         with open(txt_name, "a") as f:
             f.writelines(content_to_append)
+
+    def write2json(self,image_file,box,score,class_id):
+        annotation = {
+            "image_id": image_file,
+            "category_id": index_id_dict[class_id],
+            "bbox": box,  # YOLO格式的边界框坐标
+            "score": float(score)  # 置信度
+        }
+        self.coco_data.append(annotation)
 
     def preprocess(self,img):
         """
@@ -230,10 +240,11 @@ class Yolov8TFLite:
                 class_ids.append(idx)
 
         indices = cv2.dnn.NMSBoxes(boxes, scores, self.confidence_thres, self.iou_thres)
-        # 构建新的文件路径
-        txt_name = image_file.replace(self.input_image_folder, self.output_txt_folder).replace(".jpg", ".txt")
-        with open(txt_name, 'w') as file:
-            pass  # 不写入任何内容
+
+        # 获取文件名（包括扩展名）
+        file_name_with_extension = os.path.basename(image_file)
+        # 去除前置0并获取文件名（不包括扩展名）
+        file_name_without_extension = int(file_name_with_extension.split('.')[0])
 
         for i in indices:
             # Get the box, score, and class ID corresponding to the index
@@ -253,7 +264,11 @@ class Yolov8TFLite:
                 print(box, score, class_id)
                 # Draw the detection on the input image
                 #self.draw_detections(input_image, box, score, class_id)
-                self.write2txt(box,score,class_id,image_file,txt_name)
+                #self.write2txt(box,score,class_id,image_file,txt_name)
+                self.write2json(file_name_without_extension,box,score,class_id)
+
+        with open("detection.json", "w") as f:
+            json.dump(self.coco_data, f)
 
         #return input_image
 
@@ -269,6 +284,16 @@ class Yolov8TFLite:
         image_files = glob.glob(os.path.join(self.input_image_list, '*'))
         print("image_files:",image_files)
         for image_file in image_files:
+
+            # Preprocess the image data
+            img_data = self.preprocess(image_file)
+            img_data = img_data
+            # img_data = img_data.cpu().numpy()
+            # Set the input tensor to the interpreter
+            img_data = img_data.transpose((0, 2, 3, 1))
+
+            start = time.perf_counter()
+
             # Create an interpreter for the TFLite model
             interpreter = tflite.Interpreter(model_path=self.tflite_model)
             self.model = interpreter
@@ -283,17 +308,7 @@ class Yolov8TFLite:
             self.input_width = input_shape[1]
             self.input_height = input_shape[2]
 
-            # Preprocess the image data
-            img_data = self.preprocess(image_file)
-            img_data = img_data
-            # img_data = img_data.cpu().numpy()
-            # Set the input tensor to the interpreter
-            print(input_details[0]["index"])
-            print(img_data.shape)
-            img_data = img_data.transpose((0, 2, 3, 1))
-
-            scale, zero_point = input_details[0]["quantization"]
-            start = time.perf_counter()
+            #scale, zero_point = input_details[0]["quantization"]
             interpreter.set_tensor(input_details[0]["index"], img_data)
 
             # Run inference
@@ -336,19 +351,17 @@ if __name__ == "__main__":
     # Create an argument parser to handle command-line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model", type=str, default="yolov8n_float32.tflite", help="Input your TFLite model."
+        "--model", type=str, default="", help="Input your TFLite model."
     )
     #parser.add_argument("--img", type=str, default=str(ASSETS / "bus.jpg"), help="Path to input image.")
-    parser.add_argument("--img_list", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_jpg",help="Path to input image.")
-    parser.add_argument("--txt_list", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_txt",help="Path to output txt")
+    parser.add_argument("--img_list", type=str, default="",help="Path to input image.")
+    # parser.add_argument("--txt_list", type=str, default="C:\\work\\datasets\\coco\\test-dev\\voc_txt",help="Path to output txt")
     parser.add_argument("--conf-thres", type=float, default=0.5, help="Confidence threshold")
     parser.add_argument("--iou-thres", type=float, default=0.5, help="NMS IoU threshold")
     args = parser.parse_args()
 
-    recreate_empty_folder(args.txt_list)
-
     # Create an instance of the Yolov8TFLite class with the specified arguments
-    detection = Yolov8TFLite(args.model, args.img_list, args.txt_list, args.conf_thres, args.iou_thres)
+    detection = Yolov8TFLite(args.model, args.img_list, args.conf_thres, args.iou_thres)
 
     # Perform object detection and obtain the output image
     sum_time = detection.main()
