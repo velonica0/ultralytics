@@ -567,6 +567,23 @@ class Yolov8TFLite:
         """
         sum_time=0
         idx=0
+
+        # Create an interpreter for the TFLite model
+        interpreter = tflite.Interpreter(model_path=self.tflite_model)
+        self.model = interpreter
+        interpreter.allocate_tensors()
+
+        # Get the model inputs
+        input_details = interpreter.get_input_details()
+        output_details = interpreter.get_output_details()
+
+        # Store the shape of the input for later use
+        input_shape = input_details[0]["shape"]
+        self.input_width = input_shape[1]
+        self.input_height = input_shape[2]
+
+        # scale, zero_point = input_details[0]["quantization"]
+
         image_files = glob.glob(os.path.join(self.input_image_list, '*'))
         for image_file in image_files:
 
@@ -579,21 +596,7 @@ class Yolov8TFLite:
 
             start = time.perf_counter()
 
-            # Create an interpreter for the TFLite model
-            interpreter = tflite.Interpreter(model_path=self.tflite_model)
-            self.model = interpreter
-            interpreter.allocate_tensors()
 
-            # Get the model inputs
-            input_details = interpreter.get_input_details()
-            output_details = interpreter.get_output_details()
-
-            # Store the shape of the input for later use
-            input_shape = input_details[0]["shape"]
-            self.input_width = input_shape[1]
-            self.input_height = input_shape[2]
-
-            #scale, zero_point = input_details[0]["quantization"]
 
             interpreter.set_tensor(input_details[0]["index"], img_data)
 
